@@ -1,0 +1,61 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    --bg-primary: #f2ebe1;
+    --bg-secondary: #ebe3d8;
+    --text-primary: #5a4030;
+    --text-secondary: #a09080;
+    --accent-blue: #88c4f0;
+    --accent-blue-dark: #5aa8e0;
+    --accent-yellow: #ffd97d;
+    --accent-yellow-dark: #e8b830;
+    --accent-yellow-ink: #7a5010;
+    --border-color: #e4dbd0;
+  }
+  
+  html {
+    font-family: 'Noto Sans KR', sans-serif;
+  }
+
+  body {
+    @apply bg-[var(--bg-primary)] text-[var(--text-primary)] antialiased overflow-hidden w-screen h-screen;
+    -webkit-tap-highlight-color: transparent;
+  }
+}
+
+@layer utilities {
+  .neo-shadow {
+    box-shadow: 4px 4px 10px #d8d0c4, -4px -4px 10px #fffaf4;
+  }
+  .neo-shadow-inner {
+    box-shadow: inset 3px 3px 8px #d8d0c4, inset -3px -3px 8px #fffaf4;
+  }
+  .neo-shadow-sm {
+    box-shadow: 3px 3px 7px #d8d0c4, -3px -3px 7px #fffaf4;
+  }
+  .glass-panel {
+    @apply bg-white/40 backdrop-blur-md border border-white/50 shadow-lg;
+  }
+}
+
+.blink {
+  animation: blink 2s ease-in-out infinite;
+}
+
+@keyframes blink {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.3; }
+}
+
+@keyframes bellShake {
+  0%, 100% { transform: rotate(0); }
+  10%, 30% { transform: rotate(-14deg); }
+  20%, 40% { transform: rotate(14deg); }
+  50% { transform: rotate(0); }
+}
+.animate-bell {
+  animation: bellShake 2s ease-in-out infinite;
+}
