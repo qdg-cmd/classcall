@@ -1,0 +1,581 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+  <title>클래스콜 ClassCall</title>
+  
+  <!-- React & ReactDOM -->
+  <script src="https://unpkg.com/react@18/umd/react.production.min.js" crossorigin></script>
+  <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js" crossorigin></script>
+  
+  <!-- Babel (JSX 변환용) -->
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+  
+  <!-- Tailwind CSS -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  
+  <style>
+    @import url('https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@400;500;700;900&display=swap');
+    
+    :root {
+      --bg-primary: #f2ebe1;
+      --text-primary: #5a4030;
+    }
+    
+    body {
+      font-family: 'Noto Sans KR', sans-serif;
+      background-color: var(--bg-primary);
+      color: var(--text-primary);
+      margin: 0;
+      overflow: hidden;
+      width: 100vw;
+      height: 100vh;
+      -webkit-tap-highlight-color: transparent;
+    }
+
+    .glass-panel {
+      background: rgba(255, 255, 255, 0.4);
+      backdrop-filter: blur(10px);
+      border: 1px solid rgba(255, 255, 255, 0.5);
+      box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
+    }
+
+    .custom-scrollbar::-webkit-scrollbar { width: 6px; height: 6px; }
+    .custom-scrollbar::-webkit-scrollbar-track { background: transparent; }
+    .custom-scrollbar::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 10px; }
+
+    @keyframes bellShake {
+      0%, 100% { transform: rotate(0); }
+      10%, 30% { transform: rotate(-14deg); }
+      20%, 40% { transform: rotate(14deg); }
+      50% { transform: rotate(0); }
+    }
+    .animate-bell { animation: bellShake 2s ease-in-out infinite; }
+  </style>
+</head>
+<body>
+  <div id="root"></div>
+
+  <script type="text/babel">
+    const { useState, useEffect, useMemo } = React;
+
+    // ==========================================
+    // 1. 설정 (가장 중요: API 주소를 여기에 넣으세요!)
+    // ==========================================
+    const GAS_URL = "YOUR_GOOGLE_APPS_SCRIPT_WEB_APP_URL_HERE";
+    
+    // 시간표 데이터 (CSV에서 가져온 정적 데이터)
+    const TIMETABLE_DATA = {
+      "1": { "1": "언매 (주석원)", "2": "운건 (정재의)", "3": "인수 (배광진)", "4": "선택군 C", "5": "한문Ⅰ (구승웅)", "6": "언매 (김가영)", "7": "선택군 B-1" },
+      "2": { "1": "한문Ⅰ (구승웅)", "2": "선택군 B-2", "3": "선택군 E", "4": "운건 (정재의)", "5": "언매 (김가영)", "6": "진로 (김동욱)", "7": "" },
+      "3": { "1": "영회 (박상흠)", "2": "선택군 C", "3": "현문감 (김동욱)", "4": "선택군 E", "5": "언매 (주석원)", "6": "인수 (배광진)", "7": "" },
+      "4": { "1": "선택군 B-2", "2": "선택군 C", "3": "영회 (박상흠)", "4": "영회 (백가연)", "5": "선택군 B-1", "6": "인수 (배광진)", "7": "" },
+      "5": { "1": "선택군 B-1", "2": "인수 (배광진)", "3": "선택군 B-2", "4": "현문감 (김동욱)", "5": "영회 (백가연)", "6": "", "7": "" }
+    };
+
+    // ==========================================
+    // 2. API 통신 함수
+    // ==========================================
+    async function fetchInitData() {
+      if (GAS_URL.includes("YOUR_GOOGLE_APPS_SCRIPT")) {
+        console.warn("GAS_URL이 설정되지 않아 모의 데이터를 사용합니다.");
+        return {
+          schoolName: "광평중학교",
+          notice: "금일 하교 시간은 15:30분입니다.",
+          classMemo: "수학 수행평가 안내",
+          autoDismiss: 30,
+          teachers: [ { name: "홍길동", location: "본교무실" }, { name: "이순신", location: "학년교무실" } ],
+          studentsData: {
+            classList: [ { grade: "1", classNum: "1" }, { grade: "1", classNum: "2" } ],
+            students: [
+              { grade: "1", classNum: "1", num: "1", name: "김학생" },
+              { grade: "1", classNum: "1", num: "2", name: "이학생" },
+              { grade: "1", classNum: "2", num: "1", name: "박학생" }
+            ]
+          },
+          periodConfig: { start: "08:50", periodLen: 45, breakLen: 10, lunchAfter: 4, lunchLen: 50, maxPeriod: 7 },
+          agenda: []
+        };
+      }
+      const res = await fetch(`${GAS_URL}?api=init`);
+      return await res.json();
+    }
+
+    async function fetchCalls() {
+      if (GAS_URL.includes("YOUR_GOOGLE_APPS_SCRIPT")) return [];
+      const res = await fetch(`${GAS_URL}?api=calls`);
+      return await res.json();
+    }
+
+    async function fetchMeals() {
+      if (GAS_URL.includes("YOUR_GOOGLE_APPS_SCRIPT")) return [];
+      const res = await fetch(`${GAS_URL}?api=meal`);
+      return await res.json();
+    }
+
+    async function submitCall(callData) {
+      if (GAS_URL.includes("YOUR_GOOGLE_APPS_SCRIPT")) return { ok: true };
+      const res = await fetch(GAS_URL, { method: "POST", body: JSON.stringify({ action: "call", ...callData }) });
+      return await res.json();
+    }
+
+    async function confirmCall(row) {
+      if (GAS_URL.includes("YOUR_GOOGLE_APPS_SCRIPT")) return { ok: true };
+      const res = await fetch(`${GAS_URL}?api=confirm&row=${row}`);
+      return await res.json();
+    }
+
+    // ==========================================
+    // 3. 학생용 (전자칠판) 화면
+    // ==========================================
+    function StudentUI() {
+      const [currentTime, setCurrentTime] = useState(new Date());
+      const [initData, setInitData] = useState(null);
+      const [calls, setCalls] = useState([]);
+      const [meals, setMeals] = useState([]);
+      const [currentCall, setCurrentCall] = useState(null);
+      const [countdown, setCountdown] = useState(0);
+
+      useEffect(() => {
+        fetchInitData().then(setInitData);
+        fetchMeals().then(setMeals);
+
+        const callInterval = setInterval(() => {
+          fetchCalls().then(newCalls => {
+            if (newCalls.length > 0) {
+              setCalls(newCalls);
+              if (!currentCall) handleNewCall(newCalls[0]);
+            }
+          });
+        }, 2000);
+
+        const clockInterval = setInterval(() => { setCurrentTime(new Date()); }, 1000);
+        return () => { clearInterval(callInterval); clearInterval(clockInterval); };
+      }, [currentCall]);
+
+      const handleNewCall = (call) => {
+        setCurrentCall(call);
+        const dismissTime = initData?.autoDismiss || 30;
+        setCountdown(dismissTime);
+
+        const countdownInterval = setInterval(() => {
+          setCountdown(prev => {
+            if (prev <= 1) {
+              clearInterval(countdownInterval);
+              confirmCall(call.row);
+              setCurrentCall(null);
+              return 0;
+            }
+            return prev - 1;
+          });
+        }, 1000);
+      };
+
+      const getDayOfWeek = () => {
+        let day = currentTime.getDay();
+        if (day === 0 || day === 6) day = 1; 
+        return day.toString();
+      };
+
+      if (!initData) return <div className="flex w-full h-full items-center justify-center text-xl font-bold">로딩 중...</div>;
+
+      const todayTimetable = TIMETABLE_DATA[getDayOfWeek()];
+
+      return (
+        <div className="relative w-full h-full flex flex-col p-6 gap-6 bg-gradient-to-br from-indigo-50 to-blue-100 overflow-hidden">
+          
+          {/* Header */}
+          <header className="flex justify-between items-center bg-white/60 backdrop-blur-md rounded-2xl px-6 py-4 shadow-sm shrink-0">
+            <div className="flex items-center gap-3">
+              <div className="w-12 h-12 bg-blue-500 rounded-full flex items-center justify-center text-white font-black text-xs shadow-lg">클래스콜</div>
+              <div>
+                <h1 className="text-2xl font-black text-slate-800">{initData.schoolName || '학교명 로딩중'}</h1>
+                <p className="text-sm text-slate-500 font-medium">학생 대기화면</p>
+              </div>
+            </div>
+            <div className="flex items-center gap-2">
+              <span className="relative flex h-3 w-3">
+                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-green-400 opacity-75"></span>
+                <span className="relative inline-flex rounded-full h-3 w-3 bg-green-500"></span>
+              </span>
+              <span className="text-sm font-bold text-slate-600">온라인</span>
+            </div>
+          </header>
+
+          {/* Notice */}
+          {initData.notice && (
+            <div className="w-full bg-yellow-400 text-yellow-900 px-6 py-3 rounded-2xl flex items-center gap-4 shadow-md shrink-0">
+              <span className="text-2xl">📢</span>
+              <p className="font-bold text-lg">{initData.notice}</p>
+            </div>
+          )}
+
+          {/* Main Grid */}
+          <div className="flex-1 grid grid-cols-4 gap-6 min-h-0">
+            
+            {/* Clock & Timetable */}
+            <div className="col-span-1 flex flex-col gap-6">
+              <div className="glass-panel flex-1 rounded-3xl flex flex-col items-center justify-center p-8 gap-2">
+                <span className="text-4xl mb-2">⏰</span>
+                <p className="text-lg font-bold text-slate-500">{currentTime.getMonth() + 1}월 {currentTime.getDate()}일</p>
+                <h2 className="text-6xl font-black text-slate-800 tracking-tighter">
+                  {String(currentTime.getHours()).padStart(2, '0')}:{String(currentTime.getMinutes()).padStart(2, '0')}
+                </h2>
+                <p className="text-blue-600 font-bold mt-2">수업 중</p>
+              </div>
+
+              <div className="glass-panel flex-[2] rounded-3xl p-6 overflow-y-auto custom-scrollbar">
+                <h3 className="text-lg font-black text-slate-800 flex items-center gap-2 mb-4">📅 오늘 시간표</h3>
+                <div className="flex flex-col gap-3">
+                  {todayTimetable && Object.entries(todayTimetable).map(([period, subject]) => (
+                    <div key={period} className="flex items-center justify-between bg-white/50 px-4 py-3 rounded-xl border border-white">
+                      <span className="font-bold text-slate-500">{period}교시</span>
+                      <span className="font-black text-slate-800">{subject || '-'}</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </div>
+
+            {/* Weekly Timetable */}
+            <div className="col-span-2 glass-panel rounded-3xl p-6 flex flex-col overflow-hidden">
+              <h3 className="text-lg font-black text-slate-800 flex items-center gap-2 mb-4">📅 이번주 시간표</h3>
+              <div className="flex-1 overflow-auto rounded-xl border border-slate-200 bg-white/50 custom-scrollbar">
+                <table className="w-full text-center text-sm border-collapse">
+                  <thead>
+                    <tr className="bg-slate-100/50">
+                      <th className="p-3 border-b border-slate-200 text-slate-500 font-bold"></th>
+                      <th className={`p-3 border-b border-slate-200 font-bold ${getDayOfWeek() === '1' ? 'text-blue-600' : 'text-slate-600'}`}>월</th>
+                      <th className={`p-3 border-b border-slate-200 font-bold ${getDayOfWeek() === '2' ? 'text-blue-600' : 'text-slate-600'}`}>화</th>
+                      <th className={`p-3 border-b border-slate-200 font-bold ${getDayOfWeek() === '3' ? 'text-blue-600' : 'text-slate-600'}`}>수</th>
+                      <th className={`p-3 border-b border-slate-200 font-bold ${getDayOfWeek() === '4' ? 'text-blue-600' : 'text-slate-600'}`}>목</th>
+                      <th className={`p-3 border-b border-slate-200 font-bold ${getDayOfWeek() === '5' ? 'text-blue-600' : 'text-slate-600'}`}>금</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {[1, 2, 3, 4, 5, 6, 7].map(period => (
+                      <tr key={period} className="border-b border-slate-100 hover:bg-white/50 transition-colors">
+                        <td className="p-3 font-bold text-slate-400">{period}</td>
+                        {['1', '2', '3', '4', '5'].map(day => (
+                          <td key={day} className={`p-3 font-bold ${getDayOfWeek() === day ? 'bg-blue-50/50 text-blue-700' : 'text-slate-700'}`}>
+                            {TIMETABLE_DATA[day]?.[period.toString()] || '-'}
+                          </td>
+                        ))}
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+
+            {/* Meal & Agenda */}
+            <div className="col-span-1 flex flex-col gap-6">
+              <div className="glass-panel flex-1 rounded-3xl p-6 overflow-y-auto custom-scrollbar">
+                <h3 className="text-lg font-black text-slate-800 flex items-center gap-2 mb-4">🍱 오늘 급식</h3>
+                {meals && meals.length > 0 ? (
+                  <div className="flex flex-col gap-4">
+                    {meals.map((meal, idx) => (
+                      <div key={idx} className="bg-white/60 p-4 rounded-2xl shadow-sm border border-white">
+                        <div className="flex justify-between items-center mb-2">
+                          <span className="font-black text-orange-600 bg-orange-100 px-3 py-1 rounded-full text-sm">{meal.type}</span>
+                          {meal.kcal && <span className="font-bold text-slate-400 text-xs">{meal.kcal}</span>}
+                        </div>
+                        <p className="text-sm font-medium leading-relaxed text-slate-700" dangerouslySetInnerHTML={{ __html: meal.dishes.join('<br/>') }} />
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <p className="text-slate-500 text-center mt-10 font-bold">급식 정보가 없습니다.</p>
+                )}
+              </div>
+
+              <div className="glass-panel h-1/3 rounded-3xl p-6">
+                <h3 className="text-lg font-black text-slate-800 flex items-center gap-2 mb-3">📝 학급 메모</h3>
+                <p className="text-slate-600 font-medium whitespace-pre-wrap leading-relaxed">
+                  {initData.classMemo || "등록된 학급 메모가 없습니다."}
+                </p>
+              </div>
+            </div>
+          </div>
+
+          {/* Call Alert Modal */}
+          {currentCall && (
+            <div className="absolute inset-0 z-50 bg-slate-900/40 backdrop-blur-md flex items-center justify-center p-8 transition-opacity">
+              <div className="bg-white w-full max-w-4xl rounded-[3rem] shadow-2xl p-12 flex flex-col items-center justify-center text-center border-[12px] border-yellow-400 relative overflow-hidden">
+                <div className="absolute top-0 left-0 w-full h-2 bg-slate-100">
+                  <div className="h-full bg-yellow-400 transition-all duration-1000 ease-linear" style={{width: `${(countdown / (initData.autoDismiss || 30)) * 100}%`}}></div>
+                </div>
+
+                <span className="text-7xl animate-bell mb-6 block">🔔</span>
+                <div className="bg-yellow-100 text-yellow-800 font-black px-6 py-2 rounded-full text-xl mb-8 tracking-wide">호출</div>
+                <h2 className="text-[6rem] font-black text-slate-800 leading-none tracking-tight mb-2">
+                  {currentCall.name} <span className="text-4xl text-slate-500 font-bold">학생</span>
+                </h2>
+                <p className="text-3xl font-bold text-slate-400 mb-10">{currentCall.num}번</p>
+
+                {currentCall.message && (
+                  <div className="bg-slate-100 px-8 py-6 rounded-3xl mb-8 w-full max-w-2xl">
+                    <p className="text-2xl font-bold text-slate-700">{currentCall.message}</p>
+                  </div>
+                )}
+
+                <div className="flex gap-4 items-center mt-4">
+                  <div className="bg-blue-50 text-blue-700 font-bold px-6 py-4 rounded-2xl text-xl flex items-center gap-2">
+                    <span className="w-3 h-3 rounded-full bg-blue-500 block"></span>
+                    {currentCall.teacher} 선생님
+                  </div>
+                  {currentCall.location && (
+                    <div className="bg-orange-50 text-orange-700 font-bold px-6 py-4 rounded-2xl text-xl">
+                      📍 {currentCall.location}로 오세요
+                    </div>
+                  )}
+                </div>
+
+                <button 
+                  onClick={() => { confirmCall(currentCall.row); setCurrentCall(null); }}
+                  className="mt-12 bg-slate-800 text-white px-12 py-5 rounded-full font-black text-xl hover:bg-slate-700 transition-colors shadow-xl"
+                >
+                  확인했습니다 ({countdown}초 후 닫힘)
+                </button>
+              </div>
+            </div>
+          )}
+        </div>
+      );
+    }
+
+    // ==========================================
+    // 4. 교사용 화면
+    // ==========================================
+    function TeacherUI() {
+      const [initData, setInitData] = useState(null);
+      const [selectedTeacher, setSelectedTeacher] = useState('');
+      const [selectedClass, setSelectedClass] = useState(null);
+      const [searchQuery, setSearchQuery] = useState('');
+      const [selectedStudent, setSelectedStudent] = useState(null);
+      const [message, setMessage] = useState('');
+      const [isSubmitting, setIsSubmitting] = useState(false);
+      const [recentCalls, setRecentCalls] = useState([]);
+
+      useEffect(() => {
+        fetchInitData().then(data => {
+          setInitData(data);
+          const savedTeacher = localStorage.getItem('yc_last_teacher');
+          if (savedTeacher) setSelectedTeacher(savedTeacher);
+        });
+      }, []);
+
+      const handleTeacherChange = (e) => {
+        const val = e.target.value;
+        setSelectedTeacher(val);
+        localStorage.setItem('yc_last_teacher', val);
+      };
+
+      const filteredStudents = useMemo(() => {
+        if (!initData || !selectedClass) return [];
+        let list = initData.studentsData.students.filter(
+          s => s.grade === selectedClass.grade && s.classNum === selectedClass.classNum
+        );
+        if (searchQuery) {
+          list = list.filter(s => s.name.includes(searchQuery) || s.num.toString() === searchQuery);
+        }
+        return list;
+      }, [initData, selectedClass, searchQuery]);
+
+      const handleCall = async () => {
+        if (!selectedTeacher) { alert("선생님 이름을 먼저 선택해주세요."); return; }
+        if (!selectedStudent) { alert("호출할 학생을 선택해주세요."); return; }
+
+        setIsSubmitting(true);
+        const callData = {
+          teacher: selectedTeacher,
+          grade: selectedStudent.grade,
+          classNum: selectedStudent.classNum,
+          studentNum: selectedStudent.num,
+          studentName: selectedStudent.name,
+          message: message
+        };
+
+        const res = await submitCall(callData);
+        setIsSubmitting(false);
+
+        if (res.ok) {
+          alert("성공적으로 호출되었습니다.");
+          setRecentCalls(prev => [{ time: new Date().toLocaleTimeString('ko-KR', {hour:'2-digit', minute:'2-digit'}), ...callData }, ...prev].slice(0, 15));
+          setMessage('');
+          setSelectedStudent(null);
+        } else {
+          alert("호출 실패: " + (res.msg || res.error || "알 수 없는 오류"));
+        }
+      };
+
+      if (!initData) return <div className="flex w-full h-full items-center justify-center font-bold">로딩 중...</div>;
+
+      return (
+        <div className="w-full h-full flex flex-col bg-slate-50 text-slate-800 p-4 gap-4 overflow-hidden">
+          
+          <header className="flex items-center justify-between bg-white px-6 py-4 rounded-2xl shadow-sm shrink-0 border border-slate-100">
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 bg-blue-500 rounded-xl flex items-center justify-center text-white font-black text-xs shadow-md">클래스콜</div>
+              <h1 className="text-xl font-black text-slate-800">교사용 호출 패널</h1>
+            </div>
+            <div className="flex items-center gap-3 bg-slate-50 px-4 py-2 rounded-xl border border-slate-200">
+              <span className="text-xl">👨‍🏫</span>
+              <select 
+                value={selectedTeacher} 
+                onChange={handleTeacherChange}
+                className="bg-transparent border-none outline-none font-bold text-slate-700 cursor-pointer text-sm"
+              >
+                <option value="">선생님 선택...</option>
+                {initData.teachers?.map(t => (
+                  <option key={t.name} value={t.name}>{t.name} ({t.location})</option>
+                ))}
+              </select>
+            </div>
+          </header>
+
+          <div className="flex-1 flex gap-4 min-h-0">
+            {/* Left Panel */}
+            <div className="flex-[3] flex flex-col gap-4 min-w-0">
+              <div className="bg-white rounded-2xl shadow-sm p-5 border border-slate-100 flex flex-col gap-4 shrink-0">
+                <div className="flex gap-2 overflow-x-auto pb-2 custom-scrollbar">
+                  {initData.studentsData?.classList?.map(c => (
+                    <button
+                      key={`${c.grade}-${c.classNum}`}
+                      onClick={() => { setSelectedClass(c); setSelectedStudent(null); }}
+                      className={`px-5 py-2.5 rounded-xl font-bold whitespace-nowrap transition-all ${
+                        selectedClass?.grade === c.grade && selectedClass?.classNum === c.classNum
+                          ? 'bg-blue-500 text-white shadow-md'
+                          : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+                      }`}
+                    >
+                      {c.grade}학년 {c.classNum}반
+                    </button>
+                  ))}
+                </div>
+
+                {selectedClass && (
+                  <div className="relative">
+                    <span className="absolute left-4 top-1/2 -translate-y-1/2 text-xl">🔍</span>
+                    <input 
+                      type="text" 
+                      placeholder="  이름 또는 번호로 학생 검색..." 
+                      value={searchQuery}
+                      onChange={e => setSearchQuery(e.target.value)}
+                      className="w-full bg-slate-50 border border-slate-200 rounded-xl py-3 pl-12 pr-4 font-medium outline-none focus:border-blue-400 focus:ring-4 focus:ring-blue-100 transition-all"
+                    />
+                  </div>
+                )}
+              </div>
+
+              <div className="flex-1 bg-white rounded-2xl shadow-sm border border-slate-100 p-5 overflow-y-auto custom-scrollbar">
+                {!selectedClass ? (
+                  <div className="w-full h-full flex items-center justify-center text-slate-400 font-bold">위에서 학년/반을 선택해주세요.</div>
+                ) : filteredStudents.length === 0 ? (
+                  <div className="w-full h-full flex items-center justify-center text-slate-400 font-bold">검색된 학생이 없습니다.</div>
+                ) : (
+                  <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-5 lg:grid-cols-6 gap-3 auto-rows-max">
+                    {filteredStudents.map(student => (
+                      <button
+                        key={student.num}
+                        onClick={() => setSelectedStudent(student)}
+                        className={`flex flex-col items-center justify-center p-3 rounded-2xl border-2 transition-all ${
+                          selectedStudent?.num === student.num
+                            ? 'border-blue-500 bg-blue-50 shadow-sm'
+                            : 'border-slate-100 bg-slate-50 hover:border-blue-200 hover:bg-white'
+                        }`}
+                      >
+                        <span className={`text-xs font-bold mb-1 ${selectedStudent?.num === student.num ? 'text-blue-600' : 'text-slate-400'}`}>
+                          {student.num}번
+                        </span>
+                        <span className={`font-black tracking-tight ${selectedStudent?.num === student.num ? 'text-blue-700 text-lg' : 'text-slate-700'}`}>
+                          {student.name}
+                        </span>
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
+            </div>
+
+            {/* Right Panel */}
+            <div className="flex-[1.5] min-w-[320px] flex flex-col gap-4">
+              <div className="bg-white rounded-2xl shadow-sm border border-slate-100 p-6 flex flex-col shrink-0">
+                <h3 className="font-black text-slate-800 mb-4 flex items-center gap-2">
+                  <span className="text-xl">🚀</span> 호출 전송
+                </h3>
+                
+                <div className="bg-slate-50 rounded-xl p-4 mb-4 border border-slate-100 flex items-center justify-center min-h-[60px]">
+                  {selectedStudent ? (
+                    <span className="font-black text-blue-600 text-lg">
+                      {selectedStudent.grade}학년 {selectedStudent.classNum}반 {selectedStudent.num}번 {selectedStudent.name}
+                    </span>
+                  ) : (
+                    <span className="text-slate-400 font-bold text-sm">학생을 먼저 선택하세요</span>
+                  )}
+                </div>
+
+                <div className="relative mb-6">
+                  <span className="absolute left-4 top-4 text-xl">💬</span>
+                  <textarea
+                    value={message}
+                    onChange={e => setMessage(e.target.value)}
+                    placeholder="  전달할 메시지 (선택사항)&#10;  예: 시험지 가지고 오세요"
+                    className="w-full bg-slate-50 border border-slate-200 rounded-xl py-3 pl-12 pr-4 min-h-[100px] resize-none outline-none focus:border-blue-400 focus:ring-4 focus:ring-blue-100 transition-all font-medium"
+                  />
+                </div>
+
+                <button
+                  onClick={handleCall}
+                  disabled={isSubmitting || !selectedStudent}
+                  className="w-full bg-blue-600 hover:bg-blue-700 text-white font-black py-4 rounded-xl shadow-lg shadow-blue-200 transition-all active:scale-95 disabled:opacity-50 flex items-center justify-center gap-2"
+                >
+                  {isSubmitting ? '전송 중...' : '즉시 호출하기'}
+                </button>
+              </div>
+
+              <div className="flex-1 bg-white rounded-2xl shadow-sm border border-slate-100 p-6 flex flex-col min-h-0">
+                <h3 className="font-black text-slate-800 mb-4 flex items-center gap-2 shrink-0">
+                  <span className="text-xl">🕰️</span> 내 호출 내역
+                </h3>
+                <div className="flex-1 overflow-y-auto custom-scrollbar flex flex-col gap-3 pr-2">
+                  {recentCalls.length === 0 ? (
+                    <div className="text-center text-slate-400 font-bold mt-10">최근 호출 내역이 없습니다.</div>
+                  ) : (
+                    recentCalls.map((call, idx) => (
+                      <div key={idx} className="bg-slate-50 border border-slate-100 rounded-xl p-3 flex flex-col gap-1">
+                        <div className="flex justify-between items-center">
+                          <span className="font-black text-slate-700 text-sm">{call.studentName} 학생</span>
+                          <span className="text-xs font-bold text-slate-400">{call.time}</span>
+                        </div>
+                        <span className="text-xs font-bold text-slate-500">{call.grade}학년 {call.classNum}반 {call.studentNum}번</span>
+                        {call.message && <p className="text-sm font-medium text-slate-600 mt-1 bg-white p-2 rounded-lg border border-slate-100">{call.message}</p>}
+                      </div>
+                    ))
+                  )}
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      );
+    }
+
+    // ==========================================
+    // 5. 메인 앱 진입점
+    // ==========================================
+    function App() {
+      const [role, setRole] = useState('student');
+      useEffect(() => {
+        const params = new URLSearchParams(window.location.search);
+        if (params.get('role') === 'teacher') setRole('teacher');
+      }, []);
+      return role === 'teacher' ? <TeacherUI /> : <StudentUI />;
+    }
+
+    const root = ReactDOM.createRoot(document.getElementById('root'));
+    root.render(<App />);
+  </script>
+</body>
+</html>
