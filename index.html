@@ -125,6 +125,44 @@
       const res = await fetch(`${GAS_URL}?api=confirm&row=${row}`);
       return await res.json();
     }
+    
+    async function submitManage(action, data) {
+      if (GAS_URL.includes("YOUR_GOOGLE_APPS_SCRIPT")) {
+         alert("모의 환경에서는 수정 사항이 저장되지 않습니다.");
+         return { ok: true };
+      }
+      const res = await fetch(GAS_URL, { method: "POST", body: JSON.stringify({ action, ...data }) });
+      return await res.json();
+    }
+
+    // ==========================================
+    // 시정표 기반 수업 시간 체크 함수
+    // ==========================================
+    function checkIsClassTime(now, config) {
+      if (!config) return false;
+      const [h, m] = config.start.split(':').map(Number);
+      let currentMinutes = h * 60 + m;
+      const nowMinutes = now.getHours() * 60 + now.getMinutes();
+      
+      for (let i = 1; i <= config.maxPeriod; i++) {
+        const classStart = currentMinutes;
+        const classEnd = currentMinutes + config.periodLen;
+        if (nowMinutes >= classStart && nowMinutes < classEnd) return true; // 수업 중
+        
+        currentMinutes += config.periodLen; // 수업 끝
+        
+        if (nowMinutes >= classEnd) {
+          let breakTime = config.breakLen;
+          if (i === config.lunchAfter) breakTime = config.lunchLen;
+          
+          const breakEnd = currentMinutes + breakTime;
+          if (nowMinutes < breakEnd) return false; // 쉬는 시간
+          
+          currentMinutes += breakTime; // 쉬는 시간 끝
+        }
+      }
+      return false; // 방과후
+    }
 
     // ==========================================
     // 3. 학생용 (전자칠판) 화면
@@ -136,6 +174,10 @@
       const [meals, setMeals] = useState([]);
       const [currentCall, setCurrentCall] = useState(null);
       const [countdown, setCountdown] = useState(0);
+      
+      // 자동 최소화 상태
+      const [isMinimized, setIsMinimized] = useState(false);
+      const [isAutoMode, setIsAutoMode] = useState(true);
 
       useEffect(() => {
         fetchInitData().then(setInitData);
@@ -153,8 +195,22 @@
         const clockInterval = setInterval(() => { setCurrentTime(new Date()); }, 1000);
         return () => { clearInterval(callInterval); clearInterval(clockInterval); };
       }, [currentCall]);
+      
+      useEffect(() => {
+        if (!initData) return;
+        if (isAutoMode) {
+          const isClass = checkIsClassTime(currentTime, initData.periodConfig);
+          if (isMinimized !== isClass) setIsMinimized(isClass);
+        }
+      }, [currentTime, initData, isAutoMode, isMinimized]);
 
       const handleNewCall = (call) => {
+        // 호출 시 미니모드 해제
+        if (isMinimized) {
+          setIsAutoMode(false);
+          setIsMinimized(false);
+        }
+        
         setCurrentCall(call);
         const dismissTime = initData?.autoDismiss || 30;
         setCountdown(dismissTime);
@@ -165,6 +221,8 @@
               clearInterval(countdownInterval);
               confirmCall(call.row);
               setCurrentCall(null);
+              // 자동 모드 복귀
+              setIsAutoMode(true);
               return 0;
             }
             return prev - 1;
@@ -182,6 +240,27 @@
 
       const todayTimetable = TIMETABLE_DATA[getDayOfWeek()];
 
+      // 미니 모드 렌더링
+      if (isMinimized && !currentCall) {
+        return (
+          <div className="w-full h-full bg-transparent flex items-end justify-end p-8 pointer-events-none">
+            <div className="bg-white/90 backdrop-blur-md shadow-2xl rounded-[2rem] p-6 flex items-center gap-6 border-4 border-blue-100 pointer-events-auto">
+              <div className="w-16 h-16 bg-blue-500 rounded-2xl flex items-center justify-center text-white font-black text-lg shadow-lg">클콜</div>
+              <div>
+                <p className="text-blue-600 font-bold mb-1">수업 중 (자동 숨김)</p>
+                <p className="text-slate-800 font-black text-xl">대기화면 최소화 상태</p>
+              </div>
+              <button 
+                onClick={() => { setIsAutoMode(false); setIsMinimized(false); }}
+                className="bg-slate-100 hover:bg-slate-200 px-6 py-4 rounded-2xl font-black text-slate-700 transition-colors ml-4 shadow-sm"
+              >
+                화면 열기
+              </button>
+            </div>
+          </div>
+        );
+      }
+
       return (
         <div className="relative w-full h-full flex flex-col p-6 gap-6 bg-gradient-to-br from-indigo-50 to-blue-100 overflow-hidden">
           
@@ -194,12 +273,26 @@
                 <p className="text-sm text-slate-500 font-medium">학생 대기화면</p>
               </div>
             </div>
-            <div className="flex items-center gap-2">
-              <span className="relative flex h-3 w-3">
-                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-green-400 opacity-75"></span>
-                <span className="relative inline-flex rounded-full h-3 w-3 bg-green-500"></span>
-              </span>
-              <span className="text-sm font-bold text-slate-600">온라인</span>
+            <div className="flex items-center gap-4">
+              <button 
+                onClick={() => { setIsAutoMode(false); setIsMinimized(true); }}
+                className="bg-slate-200 hover:bg-slate-300 px-4 py-2 rounded-xl font-bold text-slate-700 transition-colors shadow-sm text-sm"
+              >
+                최소화 (숨기기)
+              </button>
+              <button 
+                onClick={() => setIsAutoMode(!isAutoMode)}
+                className={`px-4 py-2 rounded-xl font-bold transition-colors shadow-sm text-sm ${isAutoMode ? 'bg-blue-100 text-blue-700 border border-blue-200' : 'bg-slate-100 text-slate-500'}`}
+              >
+                자동 모드 {isAutoMode ? 'ON' : 'OFF'}
+              </button>
+              <div className="flex items-center gap-2 ml-2">
+                <span className="relative flex h-3 w-3">
+                  <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-green-400 opacity-75"></span>
+                  <span className="relative inline-flex rounded-full h-3 w-3 bg-green-500"></span>
+                </span>
+                <span className="text-sm font-bold text-slate-600">온라인</span>
+              </div>
             </div>
           </header>
 
@@ -216,13 +309,15 @@
             
             {/* Clock & Timetable */}
             <div className="col-span-1 flex flex-col gap-6">
-              <div className="glass-panel flex-1 rounded-3xl flex flex-col items-center justify-center p-8 gap-2">
+              <div className="glass-panel flex-1 rounded-3xl flex flex-col items-center justify-center p-8 gap-2 relative">
                 <span className="text-4xl mb-2">⏰</span>
                 <p className="text-lg font-bold text-slate-500">{currentTime.getMonth() + 1}월 {currentTime.getDate()}일</p>
                 <h2 className="text-6xl font-black text-slate-800 tracking-tighter">
                   {String(currentTime.getHours()).padStart(2, '0')}:{String(currentTime.getMinutes()).padStart(2, '0')}
                 </h2>
-                <p className="text-blue-600 font-bold mt-2">수업 중</p>
+                <p className={`font-bold mt-2 ${checkIsClassTime(currentTime, initData.periodConfig) ? 'text-blue-600' : 'text-green-600'}`}>
+                  {checkIsClassTime(currentTime, initData.periodConfig) ? '수업 중' : '쉬는 시간'}
+                </p>
               </div>
 
               <div className="glass-panel flex-[2] rounded-3xl p-6 overflow-y-auto custom-scrollbar">
@@ -333,7 +428,7 @@
                 </div>
 
                 <button 
-                  onClick={() => { confirmCall(currentCall.row); setCurrentCall(null); }}
+                  onClick={() => { confirmCall(currentCall.row); setCurrentCall(null); setIsAutoMode(true); }}
                   className="mt-12 bg-slate-800 text-white px-12 py-5 rounded-full font-black text-xl hover:bg-slate-700 transition-colors shadow-xl"
                 >
                   확인했습니다 ({countdown}초 후 닫힘)
@@ -341,6 +436,196 @@
               </div>
             </div>
           )}
+        </div>
+      );
+    }
+    
+    // ==========================================
+    // 관리자 모달 콤포넌트 (학생/교사 관리)
+    // ==========================================
+    function AdminModal({ initData, onClose, onUpdate }) {
+      const [tab, setTab] = useState('student'); // student | teacher
+      const [isSubmitting, setIsSubmitting] = useState(false);
+      
+      // Student form
+      const [sGrade, setSGrade] = useState('1');
+      const [sClass, setSClass] = useState('1');
+      const [sNum, setSNum] = useState('');
+      const [sName, setSName] = useState('');
+      const [sOld, setSOld] = useState(null); // null = add, object = edit
+
+      // Teacher form
+      const [tName, setTName] = useState('');
+      const [tLoc, setTLoc] = useState('');
+      const [tOld, setTOld] = useState(null);
+
+      const handleStudentSubmit = async (e) => {
+        e.preventDefault();
+        if(!sGrade || !sClass || !sNum || !sName) return alert('모든 항목을 입력하세요.');
+        setIsSubmitting(true);
+        const action = sOld ? 'updateStudent' : 'addStudent';
+        const payload = { grade: sGrade, classNum: sClass, num: sNum, name: sName };
+        if (sOld) {
+          payload.oldGrade = sOld.grade; payload.oldClassNum = sOld.classNum; payload.oldNum = sOld.num;
+        }
+        const res = await submitManage(action, payload);
+        setIsSubmitting(false);
+        if(res.ok) { alert('저장 성공!'); setSOld(null); setSNum(''); setSName(''); onUpdate(); }
+        else alert('실패: ' + res.msg);
+      };
+
+      const handleStudentDelete = async (s) => {
+        if(!confirm(`${s.grade}-${s.classNum} ${s.name} 학생을 삭제할까요?`)) return;
+        setIsSubmitting(true);
+        const res = await submitManage('deleteStudent', { oldGrade: s.grade, oldClassNum: s.classNum, oldNum: s.num });
+        setIsSubmitting(false);
+        if(res.ok) { alert('삭제 완료'); onUpdate(); }
+        else alert('실패: ' + res.msg);
+      };
+
+      const handleTeacherSubmit = async (e) => {
+        e.preventDefault();
+        if(!tName || !tLoc) return alert('모든 항목을 입력하세요.');
+        setIsSubmitting(true);
+        const action = tOld ? 'updateTeacher' : 'addTeacher';
+        const payload = { name: tName, location: tLoc };
+        if (tOld) payload.oldName = tOld.name;
+        const res = await submitManage(action, payload);
+        setIsSubmitting(false);
+        if(res.ok) { alert('저장 성공!'); setTOld(null); setTName(''); setTLoc(''); onUpdate(); }
+        else alert('실패: ' + res.msg);
+      };
+
+      const handleTeacherDelete = async (t) => {
+        if(!confirm(`${t.name} 선생님을 삭제할까요?`)) return;
+        setIsSubmitting(true);
+        const res = await submitManage('deleteTeacher', { oldName: t.name });
+        setIsSubmitting(false);
+        if(res.ok) { alert('삭제 완료'); onUpdate(); }
+        else alert('실패: ' + res.msg);
+      };
+
+      return (
+        <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="bg-white w-full max-w-4xl max-h-[90vh] rounded-3xl shadow-2xl flex flex-col overflow-hidden">
+            <div className="flex items-center justify-between px-6 py-4 border-b border-slate-100 bg-slate-50">
+              <h2 className="text-xl font-black text-slate-800">데이터 관리 (구글 시트 연동)</h2>
+              <button onClick={onClose} className="text-slate-400 hover:text-red-500 font-bold text-xl">&times;</button>
+            </div>
+            
+            <div className="flex border-b border-slate-200 shrink-0">
+              <button 
+                onClick={() => setTab('student')}
+                className={`flex-1 py-3 font-bold transition-colors ${tab === 'student' ? 'text-blue-600 border-b-2 border-blue-600 bg-blue-50/30' : 'text-slate-500 hover:bg-slate-50'}`}
+              >학생 명단 관리</button>
+              <button 
+                onClick={() => setTab('teacher')}
+                className={`flex-1 py-3 font-bold transition-colors ${tab === 'teacher' ? 'text-blue-600 border-b-2 border-blue-600 bg-blue-50/30' : 'text-slate-500 hover:bg-slate-50'}`}
+              >교사 명단 관리</button>
+            </div>
+
+            <div className="flex-1 overflow-y-auto p-6 bg-slate-50 custom-scrollbar">
+              {tab === 'student' && (
+                <div className="flex flex-col gap-6">
+                  {/* Student Form */}
+                  <form onSubmit={handleStudentSubmit} className="bg-white p-5 rounded-2xl shadow-sm border border-slate-100 flex flex-wrap gap-4 items-end">
+                    <div className="flex-1 min-w-[80px]">
+                      <label className="block text-xs font-bold text-slate-500 mb-1">학년</label>
+                      <input type="number" value={sGrade} onChange={e=>setSGrade(e.target.value)} className="w-full bg-slate-50 border border-slate-200 rounded-lg p-2 outline-none focus:border-blue-400 font-medium" />
+                    </div>
+                    <div className="flex-1 min-w-[80px]">
+                      <label className="block text-xs font-bold text-slate-500 mb-1">반</label>
+                      <input type="number" value={sClass} onChange={e=>setSClass(e.target.value)} className="w-full bg-slate-50 border border-slate-200 rounded-lg p-2 outline-none focus:border-blue-400 font-medium" />
+                    </div>
+                    <div className="flex-1 min-w-[80px]">
+                      <label className="block text-xs font-bold text-slate-500 mb-1">번호</label>
+                      <input type="number" value={sNum} onChange={e=>setSNum(e.target.value)} className="w-full bg-slate-50 border border-slate-200 rounded-lg p-2 outline-none focus:border-blue-400 font-medium" />
+                    </div>
+                    <div className="flex-[2] min-w-[120px]">
+                      <label className="block text-xs font-bold text-slate-500 mb-1">이름</label>
+                      <input type="text" value={sName} onChange={e=>setSName(e.target.value)} className="w-full bg-slate-50 border border-slate-200 rounded-lg p-2 outline-none focus:border-blue-400 font-medium" />
+                    </div>
+                    <button disabled={isSubmitting} type="submit" className="bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 px-6 rounded-lg transition-colors shadow-sm disabled:opacity-50">
+                      {sOld ? '수정 저장' : '새로 추가'}
+                    </button>
+                    {sOld && (
+                      <button type="button" onClick={() => {setSOld(null); setSNum(''); setSName('');}} className="bg-slate-200 hover:bg-slate-300 text-slate-700 font-bold py-2 px-4 rounded-lg transition-colors">
+                        취소
+                      </button>
+                    )}
+                  </form>
+
+                  {/* Student List */}
+                  <div className="bg-white rounded-2xl shadow-sm border border-slate-100 overflow-hidden">
+                    <table className="w-full text-left text-sm">
+                      <thead className="bg-slate-100 text-slate-500 font-bold">
+                        <tr><th className="p-3">학년</th><th className="p-3">반</th><th className="p-3">번호</th><th className="p-3">이름</th><th className="p-3 text-center">관리</th></tr>
+                      </thead>
+                      <tbody>
+                        {initData.studentsData?.students?.map(s => (
+                          <tr key={`${s.grade}-${s.classNum}-${s.num}`} className="border-b border-slate-50 hover:bg-slate-50">
+                            <td className="p-3 font-medium">{s.grade}</td>
+                            <td className="p-3 font-medium">{s.classNum}</td>
+                            <td className="p-3 font-medium">{s.num}</td>
+                            <td className="p-3 font-bold text-slate-700">{s.name}</td>
+                            <td className="p-3 flex justify-center gap-2">
+                              <button onClick={() => { setSOld(s); setSGrade(s.grade); setSClass(s.classNum); setSNum(s.num); setSName(s.name); }} className="text-blue-500 hover:text-blue-700 font-bold bg-blue-50 px-3 py-1 rounded-md">수정</button>
+                              <button onClick={() => handleStudentDelete(s)} className="text-red-500 hover:text-red-700 font-bold bg-red-50 px-3 py-1 rounded-md">삭제</button>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              )}
+
+              {tab === 'teacher' && (
+                <div className="flex flex-col gap-6">
+                  {/* Teacher Form */}
+                  <form onSubmit={handleTeacherSubmit} className="bg-white p-5 rounded-2xl shadow-sm border border-slate-100 flex flex-wrap gap-4 items-end">
+                    <div className="flex-1 min-w-[150px]">
+                      <label className="block text-xs font-bold text-slate-500 mb-1">교사 이름</label>
+                      <input type="text" value={tName} onChange={e=>setTName(e.target.value)} className="w-full bg-slate-50 border border-slate-200 rounded-lg p-2 outline-none focus:border-blue-400 font-medium" />
+                    </div>
+                    <div className="flex-[2] min-w-[200px]">
+                      <label className="block text-xs font-bold text-slate-500 mb-1">근무 위치</label>
+                      <input type="text" value={tLoc} onChange={e=>setTLoc(e.target.value)} className="w-full bg-slate-50 border border-slate-200 rounded-lg p-2 outline-none focus:border-blue-400 font-medium" />
+                    </div>
+                    <button disabled={isSubmitting} type="submit" className="bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 px-6 rounded-lg transition-colors shadow-sm disabled:opacity-50">
+                      {tOld ? '수정 저장' : '새로 추가'}
+                    </button>
+                    {tOld && (
+                      <button type="button" onClick={() => {setTOld(null); setTName(''); setTLoc('');}} className="bg-slate-200 hover:bg-slate-300 text-slate-700 font-bold py-2 px-4 rounded-lg transition-colors">
+                        취소
+                      </button>
+                    )}
+                  </form>
+
+                  {/* Teacher List */}
+                  <div className="bg-white rounded-2xl shadow-sm border border-slate-100 overflow-hidden">
+                    <table className="w-full text-left text-sm">
+                      <thead className="bg-slate-100 text-slate-500 font-bold">
+                        <tr><th className="p-3 w-1/3">이름</th><th className="p-3">근무 위치</th><th className="p-3 text-center w-32">관리</th></tr>
+                      </thead>
+                      <tbody>
+                        {initData.teachers?.map(t => (
+                          <tr key={t.name} className="border-b border-slate-50 hover:bg-slate-50">
+                            <td className="p-3 font-bold text-slate-700">{t.name}</td>
+                            <td className="p-3 font-medium text-slate-600">{t.location}</td>
+                            <td className="p-3 flex justify-center gap-2">
+                              <button onClick={() => { setTOld(t); setTName(t.name); setTLoc(t.location); }} className="text-blue-500 hover:text-blue-700 font-bold bg-blue-50 px-3 py-1 rounded-md">수정</button>
+                              <button onClick={() => handleTeacherDelete(t)} className="text-red-500 hover:text-red-700 font-bold bg-red-50 px-3 py-1 rounded-md">삭제</button>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              )}
+            </div>
+          </div>
         </div>
       );
     }
@@ -357,14 +642,17 @@
       const [message, setMessage] = useState('');
       const [isSubmitting, setIsSubmitting] = useState(false);
       const [recentCalls, setRecentCalls] = useState([]);
+      const [showAdmin, setShowAdmin] = useState(false);
 
-      useEffect(() => {
+      const loadData = () => {
         fetchInitData().then(data => {
           setInitData(data);
           const savedTeacher = localStorage.getItem('yc_last_teacher');
           if (savedTeacher) setSelectedTeacher(savedTeacher);
         });
-      }, []);
+      };
+
+      useEffect(() => { loadData(); }, []);
 
       const handleTeacherChange = (e) => {
         const val = e.target.value;
@@ -420,18 +708,27 @@
               <div className="w-10 h-10 bg-blue-500 rounded-xl flex items-center justify-center text-white font-black text-xs shadow-md">클래스콜</div>
               <h1 className="text-xl font-black text-slate-800">교사용 호출 패널</h1>
             </div>
-            <div className="flex items-center gap-3 bg-slate-50 px-4 py-2 rounded-xl border border-slate-200">
-              <span className="text-xl">👨‍🏫</span>
-              <select 
-                value={selectedTeacher} 
-                onChange={handleTeacherChange}
-                className="bg-transparent border-none outline-none font-bold text-slate-700 cursor-pointer text-sm"
+            <div className="flex items-center gap-4">
+              <button 
+                onClick={() => setShowAdmin(true)}
+                className="bg-indigo-50 hover:bg-indigo-100 text-indigo-700 px-4 py-2 rounded-xl font-bold transition-colors border border-indigo-200 flex items-center gap-2"
               >
-                <option value="">선생님 선택...</option>
-                {initData.teachers?.map(t => (
-                  <option key={t.name} value={t.name}>{t.name} ({t.location})</option>
-                ))}
-              </select>
+                <span>⚙️</span> 명단 관리
+              </button>
+              
+              <div className="flex items-center gap-3 bg-slate-50 px-4 py-2 rounded-xl border border-slate-200">
+                <span className="text-xl">👨‍🏫</span>
+                <select 
+                  value={selectedTeacher} 
+                  onChange={handleTeacherChange}
+                  className="bg-transparent border-none outline-none font-bold text-slate-700 cursor-pointer text-sm"
+                >
+                  <option value="">선생님 선택...</option>
+                  {initData.teachers?.map(t => (
+                    <option key={t.name} value={t.name}>{t.name} ({t.location})</option>
+                  ))}
+                </select>
+              </div>
             </div>
           </header>
 
@@ -558,6 +855,11 @@
               </div>
             </div>
           </div>
+          
+          {/* Admin Modal */}
+          {showAdmin && (
+            <AdminModal initData={initData} onClose={() => setShowAdmin(false)} onUpdate={loadData} />
+          )}
         </div>
       );
     }
